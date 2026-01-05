@@ -1,211 +1,385 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import type { ViewModel } from '../../src/ui/viewModel';
+import type { GatekeeperInput } from '@/core/gatekeeper/types';
+import { runGatekeeper } from '@/core/gatekeeper/gatekeeper';
+import { hashInputForAdmit } from '../../src/ui/hash';
+import { buildClarificationQuestions } from '@/core/clarification/clarification';
 
-import { runGatekeeper } from '../../src/core/gatekeeper/gatekeeper';
-import { buildClarificationQuestions } from '../../src/core/clarification/clarification';
-import type { GatekeeperInput } from '../../src/core/gatekeeper/types';
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 12px',
-  borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.16)',
-  background: 'rgba(0,0,0,0.18)',
-  color: 'inherit',
-  outline: 'none',
+const emptyDraft: GatekeeperInput = {
+	problem: '',
+	goal: '',
+	region: '',
+	capital: '',
+	time_horizon: '',
+	responsibility_confirmed: false,
+	production_related: false,
 };
 
-const taStyle: React.CSSProperties = { ...inputStyle, resize: 'vertical' };
+export default function Page() {
+	const [vm, setVm] = useState<ViewModel>({
+		ui_state: 'DRAFT',
+		draft: emptyDraft,
+	});
 
-export default function GatekeeperPage() {
-  const [form, setForm] = useState<GatekeeperInput>({
-    problem: '',
-    goal: '',
-    region: '',
-    capital: '',
-    time_horizon: '',
-    responsibility_confirmed: false,
-    production_related: false,
-    notes: '',
+	const currentHash = useMemo(() => hashInputForAdmit(vm.draft), [vm.draft]);
+
+
+  
+	function getGatekeeperAlertStyle(decision?: string) {
+		switch (decision) {
+			case 'HARD_FAIL':
+				return {
+					background: '#fdecea',
+					border: '1px solid #f44336',
+					color: '#b71c1c',
+				};
+			case 'RETURN_WITH_CONDITIONS':
+				return {
+					background: '#fff8e1',
+					border: '1px solid #ffb300',
+					color: '#7a5200',
+				};
+			case 'ADMITTED':
+				return {
+					background: '#e8f5e9',
+					border: '1px solid #4caf50',
+					color: '#1b5e20',
+				};
+			default:
+				return {
+					background: '#f5f5f5',
+					border: '1px solid #ddd',
+					color: '#333',
+				};
+		}
+	}
+
+	// Invalidation: если был ADMITTED и данные изменились → ADMITTED_DIRTY
+	useEffect(() => {
+		if (vm.admitted_hash && vm.ui_state === 'ADMITTED_CLEAN') {
+			if (currentHash !== vm.admitted_hash) {
+				setVm((p) => ({
+					...p,
+					ui_state: 'ADMITTED_DIRTY',
+					status_message: 'Данные изменены — требуется повторная проверка.',
+				}));
+			}
+		}
+	}, [currentHash, vm.admitted_hash, vm.ui_state]);
+
+function updateDraft(patch: Partial<GatekeeperInput>) {
+  setVm((prev) => {
+    const nextDraft = { ...prev.draft, ...patch };
+
+    // если уже допущено — любое изменение делает данные "грязными"
+    const wasAdmitted = prev.ui_state === "ADMITTED_CLEAN";
+
+    return {
+      ...prev,
+      draft: nextDraft,
+
+      // ВАЖНО: при правке — убираем старые результаты и сообщения
+      gatekeeper: wasAdmitted ? undefined : prev.gatekeeper,
+      ai: wasAdmitted ? undefined : prev.ai,
+
+      ui_state: wasAdmitted ? "ADMITTED_DIRTY" : prev.ui_state,
+      status_message: wasAdmitted
+        ? "Данные изменены — требуется повторная проверка."
+        : undefined,
+    };
+  });
+}
+
+async function onPrecheck() {
+  setVm((p) => ({ ...p, ui_state: "AI_CHECK_RUNNING" }));
+
+  const res = await fetch("/api/ai-precheck", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(vm.draft),
   });
 
-  const result = useMemo(() => runGatekeeper(form), [form]);
-
-  const questions = useMemo(() => {
-    return result.decision === 'RETURN_WITH_CONDITIONS'
-      ? buildClarificationQuestions(result)
-      : [];
-  }, [result]);
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
-    const { name, value, type } = e.target;
-
-    if (type === 'checkbox') {
-      const checked = (e.target as HTMLInputElement).checked;
-      setForm((p) => ({ ...p, [name]: checked } as GatekeeperInput));
-      return;
-    }
-
-    setForm((p) => ({ ...p, [name]: value } as GatekeeperInput));
+  if (!res.ok) {
+    setVm((p) => ({ ...p, ui_state: "DRAFT" }));
+    return;
   }
 
-  const badge =
-    result.decision === 'ADMITTED'
-      ? { text: 'ADMITTED', bg: '#15803d' }
-      : result.decision === 'HARD_FAIL'
-      ? { text: 'HARD_FAIL', bg: '#b91c1c' }
-      : { text: 'RETURN_WITH_CONDITIONS', bg: '#ca8a04' };
+  const ai = await res.json();
 
-  return (
-    <main style={{ padding: 24, fontFamily: 'system-ui' }}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <h1 style={{ margin: 0 }}>Gatekeeper</h1>
-        <span
-          style={{
-            padding: '4px 10px',
-            borderRadius: 999,
-            color: 'white',
-            fontSize: 12,
-            background: badge.bg,
-          }}
-        >
-          {badge.text}
-        </span>
-        <span style={{ fontSize: 12, opacity: 0.75 }}>stage: {result.stage}</span>
-      </div>
+  if (ai?.reality?.verdict === "BULLSHIT") {
+    setVm((p) => ({
+      ...p,
+      ai,
+      ui_state: "AI_HARD_STOP",
+    }));
+    return;
+  }
 
-      <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-        <Link href="/">Home</Link>
-        <Link href="/analysis">Analysis</Link>
-        <Link href="/plan">Plan</Link>
-      </div>
+  const canonicalDraft: GatekeeperInput = {
+    ...vm.draft,
+    ...ai.normalized,
+    responsibility_confirmed: Boolean(vm.draft.responsibility_confirmed),
+    production_related: Boolean(vm.draft.production_related),
+  };
 
-      <section style={{ marginTop: 18, maxWidth: 860 }}>
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>Problem</div>
-            <textarea
-              name="problem"
-              value={String(form.problem ?? '')}
-              onChange={handleChange}
-              placeholder="Что не работает, где потери, 1–2 примера..."
-              rows={3}
-              style={taStyle}
-            />
-          </div>
+  const gatekeeper = runGatekeeper(canonicalDraft);
 
-          <div>
-            <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>Goal</div>
-            <textarea
-              name="goal"
-              value={String(form.goal ?? '')}
-              onChange={handleChange}
-              placeholder="Метрика + срок. Например: 'выйти на 50 заказов/мес за 90 дней'..."
-              rows={2}
-              style={taStyle}
-            />
-          </div>
+  if (gatekeeper.decision === "HARD_FAIL") {
+    setVm((p) => ({
+      ...p,
+      ai,
+      gatekeeper,
+      ui_state: "GATEKEEPER_HARD_FAIL",
+    }));
+    return;
+  }
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>Region</div>
-              <input
-                name="region"
-                value={String(form.region ?? '')}
-                onChange={handleChange}
-                placeholder="Россия Крым / Norway Oslo"
-                style={inputStyle}
-              />
-            </div>
+  if (gatekeeper.decision === "RETURN_WITH_CONDITIONS") {
+    setVm((p) => ({
+      ...p,
+      ai,
+      gatekeeper,
+      ui_state: "GATEKEEPER_RETURN",
+    }));
+    return;
+  }
 
-            <div>
-              <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>Capital</div>
-              <input
-                name="capital"
-                value={String(form.capital ?? '')}
-                onChange={handleChange}
-                placeholder="100000 / до 200000 / 100k"
-                style={inputStyle}
-              />
-            </div>
-          </div>
+  // ✅ ADMITTED
+  const admitted_hash = hashInputForAdmit(canonicalDraft);
 
-          <div>
-            <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>Time horizon</div>
-            <input
-              name="time_horizon"
-              value={String(form.time_horizon ?? '')}
-              onChange={handleChange}
-              placeholder="2 недели / 1 месяц / 6 месяцев"
-              style={inputStyle}
-            />
-          </div>
+  setVm((p) => ({
+    ...p,
+    ai,
+    gatekeeper,
+    draft: canonicalDraft,      // 🔑 синхронизация
+    admitted_hash,
+    ui_state: "ADMITTED_CLEAN",
+    status_message: "Данные готовы (ADMITTED)",
+  }));
+}
+	const analysisEnabled = vm.ui_state === 'ADMITTED_CLEAN';
+	const precheckEnabled =
+		vm.ui_state !== 'ADMITTED_CLEAN' &&
+		vm.ui_state !== 'AI_CHECK_RUNNING' &&
+		vm.ui_state !== 'GATEKEEPER_RUNNING';
 
-          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 6 }}>
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                name="responsibility_confirmed"
-                checked={Boolean(form.responsibility_confirmed)}
-                onChange={handleChange}
-              />
-              <span>Подтверждаю ответственность</span>
-            </label>
+	const clarificationQuestions = useMemo(() => {
+		if (vm.ui_state === 'GATEKEEPER_RETURN' && vm.gatekeeper) {
+			return buildClarificationQuestions(vm.gatekeeper);
+		}
+		if (vm.ui_state === 'AI_NEEDS_CLARIFICATION' && vm.ai) {
+			return vm.ai.clarification.questions ?? [];
+		}
+		return [];
+	}, [vm.ui_state, vm.gatekeeper, vm.ai]);
 
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                name="production_related"
-                checked={Boolean(form.production_related)}
-                onChange={handleChange}
-              />
-              <span>Production related</span>
-            </label>
-          </div>
-        </div>
-      </section>
+	return (
+		<main
+			style={{
+				padding: 24,
+				maxWidth: 900,
+				margin: '0 auto',
+				fontFamily: 'system-ui',
+			}}
+		>
+			<h1>Decision-Based Business Idea Analyzer</h1>
 
-      <section style={{ marginTop: 18, maxWidth: 860 }}>
-        {result.missing_fields?.length ? (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Missing fields</div>
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {result.missing_fields.map((f) => (
-                <li key={String(f)}>{String(f)}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+			{vm.status_message && (
+				<div
+					style={{
+						padding: 12,
+						border: '1px solid #ddd',
+						borderRadius: 8,
+						marginTop: 12,
+					}}
+				>
+					{vm.status_message}
+				</div>
+			)}
 
-        {questions.length ? (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Clarification questions</div>
-            <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
-              {questions.map((q, i) => (
-                <li key={i}>{q}</li>
-              ))}
-            </ol>
-          </div>
-        ) : null}
+			{vm.gatekeeper && (
+				<section
+					style={{
+						marginTop: 24,
+						padding: 14,
+						borderRadius: 8,
+						...getGatekeeperAlertStyle(vm.gatekeeper.decision),
+					}}
+				>
+					<strong>Gatekeeper: {vm.gatekeeper.decision}</strong>
+					<div style={{ marginTop: 6 }}>
+						{vm.gatekeeper.notes.map((n, i) => (
+							<div key={i}>{n}</div>
+						))}
+					</div>
+					{/* {JSON.stringify(vm.gatekeeper, null, 2)} */}
+				</section>
+			)}
 
-        <details>
-          <summary style={{ cursor: 'pointer', opacity: 0.85 }}>Raw result (debug)</summary>
-          <pre
-            style={{
-              marginTop: 10,
-              padding: 12,
-              borderRadius: 12,
-              background: 'rgba(0,0,0,0.25)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              overflowX: 'auto',
-            }}
-          >
-            {JSON.stringify(result, null, 2)}
-          </pre>
-        </details>
-      </section>
-    </main>
-  );
+			<section style={{ marginTop: 16 }}>
+				<label>Problem</label>
+				<textarea
+					value={String(vm.draft.problem ?? '')}
+					onChange={(e) => updateDraft({ problem: e.target.value })}
+					placeholder="Что не работает сейчас? Контекст/пример."
+					style={{ width: '100%', minHeight: 80, marginTop: 6 }}
+				/>
+			</section>
+
+			<section style={{ marginTop: 16 }}>
+				<label>Goal</label>
+				<textarea
+					value={String(vm.draft.goal ?? '')}
+					onChange={(e) => updateDraft({ goal: e.target.value })}
+					placeholder="Цель обращения: проверить целесообразность/актуальность или конкретный результат."
+					style={{ width: '100%', minHeight: 70, marginTop: 6 }}
+				/>
+			</section>
+
+			<section style={{ marginTop: 16 }}>
+				<label>Region</label>
+				<input
+					value={String(vm.draft.region ?? '')}
+					onChange={(e) => updateDraft({ region: e.target.value })}
+					placeholder="Страна + регион (+город для оффлайн)."
+					style={{ width: '100%', marginTop: 6, height: 36 }}
+				/>
+			</section>
+
+			<section style={{ marginTop: 16 }}>
+				<label>Capital</label>
+				<input
+					value={String(vm.draft.capital ?? '')}
+					onChange={(e) => updateDraft({ capital: e.target.value })}
+					placeholder="Напр.: 100000 / до 200000 / 100k"
+					style={{ width: '100%', marginTop: 6, height: 36 }}
+				/>
+			</section>
+
+			<section style={{ marginTop: 16 }}>
+				<label>Time horizon</label>
+				<input
+					value={String(vm.draft.time_horizon ?? '')}
+					onChange={(e) => updateDraft({ time_horizon: e.target.value })}
+					placeholder="Опционально для допуска, но может помочь (напр.: 3 месяца)"
+					style={{ width: '100%', marginTop: 6, height: 36 }}
+				/>
+			</section>
+
+			<section style={{ marginTop: 16, display: 'flex', gap: 16 }}>
+				<label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+					<input
+						type="checkbox"
+						checked={Boolean(vm.draft.responsibility_confirmed)}
+						onChange={(e) =>
+							updateDraft({ responsibility_confirmed: e.target.checked })
+						}
+					/>
+					Я принимаю решения сам (обязательно)
+				</label>
+
+				<label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+					<input
+						type="checkbox"
+						checked={Boolean(vm.draft.production_related)}
+						onChange={(e) =>
+							updateDraft({ production_related: e.target.checked })
+						}
+					/>
+					Производственный кейс
+				</label>
+			</section>
+
+			<section style={{ marginTop: 20, display: 'flex', gap: 12 }}>
+				<button
+					disabled={!precheckEnabled}
+					onClick={onPrecheck}
+					style={{
+						height: 40,
+						padding: '0 14px',
+						background: precheckEnabled ? '#111' : '#bbb',
+					}}
+				>
+					Проверка данных
+				</button>
+
+				<button
+					disabled={!analysisEnabled}
+					style={{
+						height: 40,
+						padding: '0 14px',
+						background: analysisEnabled ? '#111' : '#bbb',
+						color: '#fff',
+						border: 'none',
+						borderRadius: 6,
+						cursor: analysisEnabled ? 'pointer' : 'not-allowed',
+						opacity: analysisEnabled ? 1 : 0.9,
+					}}
+				>
+					Анализ
+				</button>
+			</section>
+
+			{vm.ui_state === 'ADMITTED_CLEAN' && (
+				<div style={{ marginTop: 10, color: '#444' }}>
+					Проверка данных заблокирована: данные готовы. Любое изменение
+					заблокирует анализ.
+				</div>
+			)}
+
+			{vm.ui_state === 'ADMITTED_DIRTY' && (
+				<div style={{ marginTop: 10, color: '#444' }}>
+					Данные изменены. Сначала нажми “Проверка данных”.
+				</div>
+			)}
+
+			{clarificationQuestions.length > 0 && (
+				<section style={{ marginTop: 24 }}>
+					<h3>Уточнения</h3>
+					<ul>
+						{clarificationQuestions.map((q, i) => (
+							<li key={i}>{q}</li>
+						))}
+					</ul>
+				</section>
+			)}
+
+			{/* {vm.gatekeeper && (
+				<section
+					style={{
+						marginTop: 24,
+						padding: 14,
+						borderRadius: 8,
+						...getGatekeeperAlertStyle(vm.gatekeeper.decision),
+					}}
+				>
+					<strong>RESULT: {vm.gatekeeper.decision}</strong>
+					<div style={{ marginTop: 6 }}>
+						{vm.gatekeeper.notes.map((n, i) => (
+							<div key={i}>{n}</div>
+						))}
+					</div>
+					{/* {JSON.stringify(vm.gatekeeper, null, 2)} */}
+			{/* </section> */}
+			{/* )} */}
+
+			{vm.ai && (
+				<section style={{ marginTop: 24 }}>
+					<h3>AI precheck</h3>
+					<pre
+						style={{
+							whiteSpace: 'pre-wrap',
+							padding: 12,
+							border: '1px solid #ddd',
+							borderRadius: 8,
+						}}
+					>
+						{JSON.stringify(vm.ai, null, 2)}
+					</pre>
+				</section>
+			)}
+		</main>
+	);
 }

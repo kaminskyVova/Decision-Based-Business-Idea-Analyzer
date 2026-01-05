@@ -1,4 +1,4 @@
-import type { GatekeeperResult, GatekeeperInput } from "../gatekeeper/types";
+import type { GatekeeperResult, GatekeeperInput } from "@/core/gatekeeper/types";
 
 type Question = string;
 
