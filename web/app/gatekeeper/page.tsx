@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { dictionaries, type Lang } from '@/i18n/index';
 import type { ViewModel } from '../../src/ui/viewModel';
 import type { GatekeeperInput } from '@/core/gatekeeper/types';
 import { runGatekeeper } from '@/core/gatekeeper/gatekeeper';
@@ -25,8 +26,19 @@ export default function Page() {
 
 	const currentHash = useMemo(() => hashInputForAdmit(vm.draft), [vm.draft]);
 
+	const [lang, setLang] = useState<Lang>('ru');
 
-  
+	const t = useCallback(
+		(path: string) => {
+			return (
+				path
+					.split('.')
+					.reduce((acc: any, key) => acc?.[key], dictionaries[lang]) ?? path
+			);
+		},
+		[lang]
+	);
+
 	function getGatekeeperAlertStyle(decision?: string) {
 		switch (decision) {
 			case 'HARD_FAIL':
@@ -69,96 +81,96 @@ export default function Page() {
 		}
 	}, [currentHash, vm.admitted_hash, vm.ui_state]);
 
-function updateDraft(patch: Partial<GatekeeperInput>) {
-  setVm((prev) => {
-    const nextDraft = { ...prev.draft, ...patch };
+	function updateDraft(patch: Partial<GatekeeperInput>) {
+		setVm((prev) => {
+			const nextDraft = { ...prev.draft, ...patch };
 
-    // если уже допущено — любое изменение делает данные "грязными"
-    const wasAdmitted = prev.ui_state === "ADMITTED_CLEAN";
+			// если уже допущено — любое изменение делает данные "грязными"
+			const wasAdmitted = prev.ui_state === 'ADMITTED_CLEAN';
 
-    return {
-      ...prev,
-      draft: nextDraft,
+			return {
+				...prev,
+				draft: nextDraft,
 
-      // ВАЖНО: при правке — убираем старые результаты и сообщения
-      gatekeeper: wasAdmitted ? undefined : prev.gatekeeper,
-      ai: wasAdmitted ? undefined : prev.ai,
+				// ВАЖНО: при правке — убираем старые результаты и сообщения
+				gatekeeper: wasAdmitted ? undefined : prev.gatekeeper,
+				ai: wasAdmitted ? undefined : prev.ai,
 
-      ui_state: wasAdmitted ? "ADMITTED_DIRTY" : prev.ui_state,
-      status_message: wasAdmitted
-        ? "Данные изменены — требуется повторная проверка."
-        : undefined,
-    };
-  });
-}
+				ui_state: wasAdmitted ? 'ADMITTED_DIRTY' : prev.ui_state,
+				status_message: wasAdmitted
+					? 'Данные изменены — требуется повторная проверка.'
+					: undefined,
+			};
+		});
+	}
 
-async function onPrecheck() {
-  setVm((p) => ({ ...p, ui_state: "AI_CHECK_RUNNING" }));
+	async function onPrecheck() {
+		setVm((p) => ({ ...p, ui_state: 'AI_CHECK_RUNNING' }));
 
-  const res = await fetch("/api/ai-precheck", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(vm.draft),
-  });
+		const res = await fetch('/api/ai-precheck', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(vm.draft),
+		});
 
-  if (!res.ok) {
-    setVm((p) => ({ ...p, ui_state: "DRAFT" }));
-    return;
-  }
+		if (!res.ok) {
+			setVm((p) => ({ ...p, ui_state: 'DRAFT' }));
+			return;
+		}
 
-  const ai = await res.json();
+		const ai = await res.json();
 
-  if (ai?.reality?.verdict === "BULLSHIT") {
-    setVm((p) => ({
-      ...p,
-      ai,
-      ui_state: "AI_HARD_STOP",
-    }));
-    return;
-  }
+		if (ai?.reality?.verdict === 'BULLSHIT') {
+			setVm((p) => ({
+				...p,
+				ai,
+				ui_state: 'AI_HARD_STOP',
+			}));
+			return;
+		}
 
-  const canonicalDraft: GatekeeperInput = {
-    ...vm.draft,
-    ...ai.normalized,
-    responsibility_confirmed: Boolean(vm.draft.responsibility_confirmed),
-    production_related: Boolean(vm.draft.production_related),
-  };
+		const canonicalDraft: GatekeeperInput = {
+			...vm.draft,
+			...ai.normalized,
+			responsibility_confirmed: Boolean(vm.draft.responsibility_confirmed),
+			production_related: Boolean(vm.draft.production_related),
+		};
 
-  const gatekeeper = runGatekeeper(canonicalDraft);
+		const gatekeeper = runGatekeeper(canonicalDraft);
 
-  if (gatekeeper.decision === "HARD_FAIL") {
-    setVm((p) => ({
-      ...p,
-      ai,
-      gatekeeper,
-      ui_state: "GATEKEEPER_HARD_FAIL",
-    }));
-    return;
-  }
+		if (gatekeeper.decision === 'HARD_FAIL') {
+			setVm((p) => ({
+				...p,
+				ai,
+				gatekeeper,
+				ui_state: 'GATEKEEPER_HARD_FAIL',
+			}));
+			return;
+		}
 
-  if (gatekeeper.decision === "RETURN_WITH_CONDITIONS") {
-    setVm((p) => ({
-      ...p,
-      ai,
-      gatekeeper,
-      ui_state: "GATEKEEPER_RETURN",
-    }));
-    return;
-  }
+		if (gatekeeper.decision === 'RETURN_WITH_CONDITIONS') {
+			setVm((p) => ({
+				...p,
+				ai,
+				gatekeeper,
+				ui_state: 'GATEKEEPER_RETURN',
+			}));
+			return;
+		}
 
-  // ✅ ADMITTED
-  const admitted_hash = hashInputForAdmit(canonicalDraft);
+		// ✅ ADMITTED
+		const admitted_hash = hashInputForAdmit(canonicalDraft);
 
-  setVm((p) => ({
-    ...p,
-    ai,
-    gatekeeper,
-    draft: canonicalDraft,      // 🔑 синхронизация
-    admitted_hash,
-    ui_state: "ADMITTED_CLEAN",
-    status_message: "Данные готовы (ADMITTED)",
-  }));
-}
+		setVm((p) => ({
+			...p,
+			ai,
+			gatekeeper,
+			draft: canonicalDraft, // 🔑 синхронизация
+			admitted_hash,
+			ui_state: 'ADMITTED_CLEAN',
+			status_message: 'Данные готовы (ADMITTED)',
+		}));
+	}
 	const analysisEnabled = vm.ui_state === 'ADMITTED_CLEAN';
 	const precheckEnabled =
 		vm.ui_state !== 'ADMITTED_CLEAN' &&
@@ -184,7 +196,11 @@ async function onPrecheck() {
 				fontFamily: 'system-ui',
 			}}
 		>
-			<h1>Decision-Based Business Idea Analyzer</h1>
+			<h1>{t('gatekeeper.title')}</h1>
+			<div style={{ display: 'flex', gap: 8 }}>
+				<button onClick={() => setLang('ru')}>Русский</button>
+				<button onClick={() => setLang('en')}>English</button>
+			</div>
 
 			{vm.status_message && (
 				<div
@@ -214,81 +230,80 @@ async function onPrecheck() {
 							<div key={i}>{n}</div>
 						))}
 					</div>
-					{/* {JSON.stringify(vm.gatekeeper, null, 2)} */}
 				</section>
 			)}
 
 			<section style={{ marginTop: 16 }}>
-				<label>Problem</label>
+				<label>{t('gatekeeper.fields.problem.label')}</label>
 				<textarea
 					value={String(vm.draft.problem ?? '')}
 					onChange={(e) => updateDraft({ problem: e.target.value })}
-					placeholder="Что не работает сейчас? Контекст/пример."
+					placeholder={t('gatekeeper.fields.problem.placeholder')}
 					style={{ width: '100%', minHeight: 80, marginTop: 6 }}
 				/>
 			</section>
 
 			<section style={{ marginTop: 16 }}>
-				<label>Goal</label>
+				<label>{t('gatekeeper.fields.goal.label')}</label>
 				<textarea
 					value={String(vm.draft.goal ?? '')}
 					onChange={(e) => updateDraft({ goal: e.target.value })}
-					placeholder="Цель обращения: проверить целесообразность/актуальность или конкретный результат."
+					placeholder={t('gatekeeper.fields.goal.placeholder')}
 					style={{ width: '100%', minHeight: 70, marginTop: 6 }}
 				/>
 			</section>
 
 			<section style={{ marginTop: 16 }}>
-				<label>Region</label>
+				<label>{t('gatekeeper.fields.region.label')}</label>
 				<input
 					value={String(vm.draft.region ?? '')}
 					onChange={(e) => updateDraft({ region: e.target.value })}
-					placeholder="Страна + регион (+город для оффлайн)."
+					placeholder={t('gatekeeper.fields.region.placeholder')}
 					style={{ width: '100%', marginTop: 6, height: 36 }}
 				/>
 			</section>
 
 			<section style={{ marginTop: 16 }}>
-				<label>Capital</label>
+				<label>{t('gatekeeper.fields.capital.label')}</label>
 				<input
 					value={String(vm.draft.capital ?? '')}
 					onChange={(e) => updateDraft({ capital: e.target.value })}
-					placeholder="Напр.: 100000 / до 200000 / 100k"
+					placeholder={t('gatekeeper.fields.capital.placeholder')}
 					style={{ width: '100%', marginTop: 6, height: 36 }}
 				/>
 			</section>
 
 			<section style={{ marginTop: 16 }}>
-				<label>Time horizon</label>
+				<label>{t('gatekeeper.fields.time_horizon.label')}</label>
 				<input
 					value={String(vm.draft.time_horizon ?? '')}
 					onChange={(e) => updateDraft({ time_horizon: e.target.value })}
-					placeholder="Опционально для допуска, но может помочь (напр.: 3 месяца)"
+					placeholder={t('gatekeeper.fields.timeHorizon.placeholder')}
 					style={{ width: '100%', marginTop: 6, height: 36 }}
 				/>
 			</section>
 
 			<section style={{ marginTop: 16, display: 'flex', gap: 16 }}>
-				<label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+				<label>
 					<input
 						type="checkbox"
-						checked={Boolean(vm.draft.responsibility_confirmed)}
+						checked={vm.draft.responsibility_confirmed}
 						onChange={(e) =>
 							updateDraft({ responsibility_confirmed: e.target.checked })
 						}
 					/>
-					Я принимаю решения сам (обязательно)
+					{t('gatekeeper.checkboxes.responsibility')}
 				</label>
 
-				<label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+				<label>
 					<input
 						type="checkbox"
-						checked={Boolean(vm.draft.production_related)}
+						checked={vm.draft.production_related}
 						onChange={(e) =>
 							updateDraft({ production_related: e.target.checked })
 						}
 					/>
-					Производственный кейс
+					{t('gatekeeper.checkboxes.production')}
 				</label>
 			</section>
 
@@ -302,7 +317,7 @@ async function onPrecheck() {
 						background: precheckEnabled ? '#111' : '#bbb',
 					}}
 				>
-					Проверка данных
+					{t('gatekeeper.buttons.precheck')}
 				</button>
 
 				<button
@@ -318,7 +333,7 @@ async function onPrecheck() {
 						opacity: analysisEnabled ? 1 : 0.9,
 					}}
 				>
-					Анализ
+					{t('gatekeeper.buttons.analysis')}
 				</button>
 			</section>
 

@@ -4,7 +4,7 @@ export default function HomePage() {
 	return (
 		<main style={{ padding: 24, fontFamily: 'system-ui' }}>
 			<h1>Decision-Based Business Idea Analyzer</h1>
-			<p>Выбери модуль:</p>
+			<p>Выбери модуль/Choose a module:</p>
 
 			<ul style={{ lineHeight: 2 }}>
 				<li>
