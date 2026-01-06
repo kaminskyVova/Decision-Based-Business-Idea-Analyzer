@@ -14,6 +14,7 @@ const emptyDraft: GatekeeperInput = {
 	region: '',
 	capital: '',
 	time_horizon: '',
+	mandatory_expenses: false,
 	responsibility_confirmed: false,
 	production_related: false,
 };
@@ -75,7 +76,7 @@ export default function Page() {
 				setVm((p) => ({
 					...p,
 					ui_state: 'ADMITTED_DIRTY',
-					status_message: 'Данные изменены — требуется повторная проверка.',
+					status_key: 'gatekeeper.result.badges.admitted_dirty',
 				}));
 			}
 		}
@@ -97,15 +98,19 @@ export default function Page() {
 				ai: wasAdmitted ? undefined : prev.ai,
 
 				ui_state: wasAdmitted ? 'ADMITTED_DIRTY' : prev.ui_state,
-				status_message: wasAdmitted
-					? 'Данные изменены — требуется повторная проверка.'
+				status_key: wasAdmitted
+					? 'gatekeeper.result.badges.admitted_dirty'
 					: undefined,
 			};
 		});
 	}
 
 	async function onPrecheck() {
-		setVm((p) => ({ ...p, ui_state: 'AI_CHECK_RUNNING' }));
+		setVm((p) => ({
+			...p,
+			ui_state: 'AI_CHECK_RUNNING',
+			status_key: 'gatekeeper.result.badges.checking',
+		}));
 
 		const res = await fetch('/api/ai-precheck', {
 			method: 'POST',
@@ -114,7 +119,11 @@ export default function Page() {
 		});
 
 		if (!res.ok) {
-			setVm((p) => ({ ...p, ui_state: 'DRAFT' }));
+			setVm((p) => ({
+				...p,
+				ui_state: 'DRAFT',
+				status_key: 'gatekeeper.result.badges.ai_error',
+			}));
 			return;
 		}
 
@@ -134,7 +143,14 @@ export default function Page() {
 			...ai.normalized,
 			responsibility_confirmed: Boolean(vm.draft.responsibility_confirmed),
 			production_related: Boolean(vm.draft.production_related),
+			mandatory_expenses: Boolean(vm.draft.mandatory_expenses),
 		};
+
+		setVm((p) => ({
+			...p,
+			ui_state: 'GATEKEEPER_RUNNING',
+			status_key: t(`gatekeeper.result.badges.gatekeeper_running`),
+		}));
 
 		const gatekeeper = runGatekeeper(canonicalDraft);
 
@@ -168,7 +184,7 @@ export default function Page() {
 			draft: canonicalDraft, // 🔑 синхронизация
 			admitted_hash,
 			ui_state: 'ADMITTED_CLEAN',
-			status_message: 'Данные готовы (ADMITTED)',
+			status_key: t(`gatekeeper.result.badges.admitted_clean`),
 		}));
 	}
 	const analysisEnabled = vm.ui_state === 'ADMITTED_CLEAN';
@@ -202,7 +218,7 @@ export default function Page() {
 				<button onClick={() => setLang('en')}>English</button>
 			</div>
 
-			{vm.status_message && (
+			{vm.status_key && (
 				<div
 					style={{
 						padding: 12,
@@ -211,7 +227,7 @@ export default function Page() {
 						marginTop: 12,
 					}}
 				>
-					{vm.status_message}
+					{t(vm.status_key)}
 				</div>
 			)}
 
@@ -224,11 +240,11 @@ export default function Page() {
 						...getGatekeeperAlertStyle(vm.gatekeeper.decision),
 					}}
 				>
-					<strong>Gatekeeper: {vm.gatekeeper.decision}</strong>
+					<strong>
+						{t(`gatekeeper.result.decision.${vm.gatekeeper.decision}`)}
+					</strong>
 					<div style={{ marginTop: 6 }}>
-						{vm.gatekeeper.notes.map((n, i) => (
-							<div key={i}>{n}</div>
-						))}
+						{t(`gatekeeper.result.notes.${vm.gatekeeper.decision}`)}
 					</div>
 				</section>
 			)}
@@ -271,6 +287,16 @@ export default function Page() {
 					placeholder={t('gatekeeper.fields.capital.placeholder')}
 					style={{ width: '100%', marginTop: 6, height: 36 }}
 				/>
+				<label>
+					<input
+						type="checkbox"
+						checked={vm.draft.mandatory_expenses}
+						onChange={(e) =>
+							updateDraft({ mandatory_expenses: e.target.checked })
+						}
+					/>
+					{t('gatekeeper.checkboxes.mandatory_expenses')}
+				</label>
 			</section>
 
 			<section style={{ marginTop: 16 }}>
@@ -278,7 +304,7 @@ export default function Page() {
 				<input
 					value={String(vm.draft.time_horizon ?? '')}
 					onChange={(e) => updateDraft({ time_horizon: e.target.value })}
-					placeholder={t('gatekeeper.fields.timeHorizon.placeholder')}
+					placeholder={t('gatekeeper.fields.time_horizon.placeholder')}
 					style={{ width: '100%', marginTop: 6, height: 36 }}
 				/>
 			</section>
@@ -339,20 +365,19 @@ export default function Page() {
 
 			{vm.ui_state === 'ADMITTED_CLEAN' && (
 				<div style={{ marginTop: 10, color: '#444' }}>
-					Проверка данных заблокирована: данные готовы. Любое изменение
-					заблокирует анализ.
+					{t('gatekeeper.result.badges.admitted_clean')}
 				</div>
 			)}
 
 			{vm.ui_state === 'ADMITTED_DIRTY' && (
 				<div style={{ marginTop: 10, color: '#444' }}>
-					Данные изменены. Сначала нажми “Проверка данных”.
+					{t('gatekeeper.result.badges.admitted_dirty')}
 				</div>
 			)}
 
 			{clarificationQuestions.length > 0 && (
 				<section style={{ marginTop: 24 }}>
-					<h3>Уточнения</h3>
+					<h3>{t('gatekeeper.result.sections.clarification')}</h3>
 					<ul>
 						{clarificationQuestions.map((q, i) => (
 							<li key={i}>{q}</li>
@@ -361,28 +386,9 @@ export default function Page() {
 				</section>
 			)}
 
-			{/* {vm.gatekeeper && (
-				<section
-					style={{
-						marginTop: 24,
-						padding: 14,
-						borderRadius: 8,
-						...getGatekeeperAlertStyle(vm.gatekeeper.decision),
-					}}
-				>
-					<strong>RESULT: {vm.gatekeeper.decision}</strong>
-					<div style={{ marginTop: 6 }}>
-						{vm.gatekeeper.notes.map((n, i) => (
-							<div key={i}>{n}</div>
-						))}
-					</div>
-					{/* {JSON.stringify(vm.gatekeeper, null, 2)} */}
-			{/* </section> */}
-			{/* )} */}
-
 			{vm.ai && (
 				<section style={{ marginTop: 24 }}>
-					<h3>AI precheck</h3>
+					<h3>{t('gatekeeper.result.sections.ai')}</h3>
 					<pre
 						style={{
 							whiteSpace: 'pre-wrap',

@@ -35,6 +35,7 @@ export type GatekeeperInput = {
   time_horizon: string;
   responsibility_confirmed: boolean;
   production_related: boolean;
+  mandatory_expenses: boolean;
   notes?: string;
 };
 

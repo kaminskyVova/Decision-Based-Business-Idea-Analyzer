@@ -24,5 +24,5 @@ export type ViewModel = {
   ai?: AIPrecheckResult;
   gatekeeper?: GatekeeperResult;
   admitted_hash?: string;       // snapshot при ADMITTED
-  status_message?: string;
+  status_key?: string;
 };
