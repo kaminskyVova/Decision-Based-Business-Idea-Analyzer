@@ -203,24 +203,12 @@ export default function Page() {
 		vm.ui_state !== 'GATEKEEPER_RUNNING';
 
 	/**
-	 * ✅ Clarification list:
-	 * - строится из GatekeeperResult.missing_fields + stage
-	 * - переводится через i18n ключи (ru/en)
-	 *
+	 * ✅ Clarification list (i18n):
 	 * Ожидаемые ключи:
-	 * gatekeeper.result.clarification.title
-	 * gatekeeper.result.clarification.items.idea
-	 * gatekeeper.result.clarification.items.goal
-	 * gatekeeper.result.clarification.items.context
-	 * gatekeeper.result.clarification.items.problem
-	 * gatekeeper.result.clarification.items.country
-	 * gatekeeper.result.clarification.items.region
-	 * gatekeeper.result.clarification.items.city
-	 * gatekeeper.result.clarification.items.capital
-	 * gatekeeper.result.clarification.items.time_horizon
-	 * gatekeeper.result.clarification.items.responsibility
-	 * gatekeeper.result.clarification.stage.legality
-	 * gatekeeper.result.clarification.stage.reality
+	 * gatekeeper.result.section.clarification
+	 * gatekeeper.result.clarification.items.*
+	 * gatekeeper.result.clarification.stage.*
+	 * gatekeeper.result.clarification.cta
 	 */
 	const clarificationItems = useMemo(() => {
 		if (!vm.gatekeeper) return [];
@@ -260,7 +248,7 @@ export default function Page() {
 			items.push(t(`gatekeeper.result.clarification.items.${key}`));
 		}
 
-		// stage-based additions (если хочешь подсказки “над полями”)
+		// stage-based additions
 		if (vm.gatekeeper.stage === 'LEGALITY') {
 			items.push(t('gatekeeper.result.clarification.stage.legality'));
 		}
@@ -268,9 +256,60 @@ export default function Page() {
 			items.push(t('gatekeeper.result.clarification.stage.reality'));
 		}
 
-		// de-dup
 		return Array.from(new Set(items)).filter(Boolean);
 	}, [vm.gatekeeper, t]);
+
+	// ===== UX: field highlight from missing_fields =====
+	const missingSet = useMemo(() => {
+		const arr = (vm.gatekeeper as any)?.missing_fields ?? [];
+		return new Set(arr.map((x: any) => String(x)));
+	}, [vm.gatekeeper]);
+
+	const isMissing = useCallback(
+		(key: string) => vm.ui_state === 'GATEKEEPER_RETURN' && missingSet.has(key),
+		[missingSet, vm.ui_state],
+	);
+
+	const labelStyle = useCallback(
+		(key: string) => ({
+			fontWeight: isMissing(key) ? 700 : 400,
+			color: isMissing(key) ? '#7a5200' : '#111',
+		}),
+		[isMissing],
+	);
+
+	const controlBorder = useCallback(
+		(key: string) => (isMissing(key) ? '2px solid #ffb300' : '1px solid #ccc'),
+		[isMissing],
+	);
+
+	const textareaStyle = useCallback(
+		(key: string) => ({
+			width: '100%',
+			minHeight: 70,
+			marginTop: 6,
+			padding: 10,
+			borderRadius: 6,
+			border: controlBorder(key),
+			outline: 'none',
+		}),
+		[controlBorder],
+	);
+
+	const inputStyle = useCallback(
+		(key: string) => ({
+			height: 36,
+			padding: '0 10px',
+			borderRadius: 6,
+			border: controlBorder(key),
+			outline: 'none',
+		}),
+		[controlBorder],
+	);
+
+	const scrollToClarification = useCallback(() => {
+		document.getElementById('clarification')?.scrollIntoView({ behavior: 'smooth' });
+	}, []);
 
 	return (
 		<main
@@ -318,6 +357,25 @@ export default function Page() {
 							{t(`gatekeeper.result.decision.${vm.gatekeeper.decision}`)}
 						</div>
 
+						{vm.ui_state === 'GATEKEEPER_RETURN' && clarificationItems.length > 0 && (
+							<div style={{ marginTop: 10 }}>
+								<button
+									type="button"
+									onClick={scrollToClarification}
+									style={{
+										height: 34,
+										padding: '0 10px',
+										borderRadius: 6,
+										border: '1px solid #ffb300',
+										background: '#ed900f',
+										cursor: 'pointer',
+									}}
+								>
+									{t('gatekeeper.result.clarification.cta')}
+								</button>
+							</div>
+						)}
+
 						{Array.isArray((vm.gatekeeper as any).reason_codes) &&
 							(vm.gatekeeper as any).reason_codes.length > 0 && (
 								<ul style={{ marginTop: 10 }}>
@@ -361,9 +419,7 @@ export default function Page() {
 								type="radio"
 								name="request_type"
 								checked={vm.draft.request_type === 'PROBLEM_SOLVING'}
-								onChange={() =>
-									updateDraft({ request_type: 'PROBLEM_SOLVING' })
-								}
+								onChange={() => updateDraft({ request_type: 'PROBLEM_SOLVING' })}
 							/>
 							{t('gatekeeper.fields.request_type.problem_solving')}
 						</label>
@@ -397,45 +453,45 @@ export default function Page() {
 
 				{/* Idea */}
 				<section style={{ marginTop: 16 }}>
-					<label>{t('gatekeeper.fields.idea.label')}</label>
+					<label style={labelStyle('idea')}>{t('gatekeeper.fields.idea.label')}</label>
 					<textarea
 						value={String(vm.draft.idea ?? '')}
 						onChange={(e) => updateDraft({ idea: e.target.value })}
 						placeholder={t('gatekeeper.fields.idea.placeholder')}
-						style={{ width: '100%', minHeight: 70, marginTop: 6 }}
+						style={{ ...textareaStyle('idea'), minHeight: 70 }}
 					/>
 				</section>
 
 				{/* Goal */}
 				<section style={{ marginTop: 16 }}>
-					<label>{t('gatekeeper.fields.goal.label')}</label>
+					<label style={labelStyle('goal')}>{t('gatekeeper.fields.goal.label')}</label>
 					<textarea
 						value={String(vm.draft.goal ?? '')}
 						onChange={(e) => updateDraft({ goal: e.target.value })}
 						placeholder={t('gatekeeper.fields.goal.placeholder')}
-						style={{ width: '100%', minHeight: 70, marginTop: 6 }}
+						style={{ ...textareaStyle('goal'), minHeight: 70 }}
 					/>
 				</section>
 
 				{/* Context OR Problem */}
 				{vm.draft.request_type === 'OPPORTUNITY' ? (
 					<section style={{ marginTop: 16 }}>
-						<label>{t('gatekeeper.fields.context.label')}</label>
+						<label style={labelStyle('context')}>{t('gatekeeper.fields.context.label')}</label>
 						<textarea
 							value={String(vm.draft.context ?? '')}
 							onChange={(e) => updateDraft({ context: e.target.value })}
 							placeholder={t('gatekeeper.fields.context.placeholder')}
-							style={{ width: '100%', minHeight: 70, marginTop: 6 }}
+							style={{ ...textareaStyle('context'), minHeight: 70 }}
 						/>
 					</section>
 				) : (
 					<section style={{ marginTop: 16 }}>
-						<label>{t('gatekeeper.fields.problem.label')}</label>
+						<label style={labelStyle('problem')}>{t('gatekeeper.fields.problem.label')}</label>
 						<textarea
 							value={String(vm.draft.problem ?? '')}
 							onChange={(e) => updateDraft({ problem: e.target.value })}
 							placeholder={t('gatekeeper.fields.problem.placeholder')}
-							style={{ width: '100%', minHeight: 80, marginTop: 6 }}
+							style={{ ...textareaStyle('problem'), minHeight: 80 }}
 						/>
 					</section>
 				)}
@@ -460,7 +516,7 @@ export default function Page() {
 								})
 							}
 							placeholder={t('gatekeeper.fields.region_country.placeholder')}
-							style={{ height: 36 }}
+							style={inputStyle('region.country')}
 						/>
 						<input
 							value={String(vm.draft.region?.region ?? '')}
@@ -470,7 +526,7 @@ export default function Page() {
 								})
 							}
 							placeholder={t('gatekeeper.fields.region_region.placeholder')}
-							style={{ height: 36 }}
+							style={inputStyle('region.region')}
 						/>
 					</div>
 
@@ -483,7 +539,7 @@ export default function Page() {
 								})
 							}
 							placeholder={t('gatekeeper.fields.region_city.placeholder')}
-							style={{ width: '100%', height: 36 }}
+							style={{ ...inputStyle('region.city'), width: '100%' }}
 						/>
 						{vm.draft.project_type === 'ONLINE' && (
 							<div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
@@ -495,12 +551,12 @@ export default function Page() {
 
 				{/* Capital */}
 				<section style={{ marginTop: 16 }}>
-					<label>{t('gatekeeper.fields.capital.label')}</label>
+					<label style={labelStyle('capital')}>{t('gatekeeper.fields.capital.label')}</label>
 					<input
 						value={String(vm.draft.capital ?? '')}
 						onChange={(e) => updateDraft({ capital: e.target.value })}
 						placeholder={t('gatekeeper.fields.capital.placeholder')}
-						style={{ width: '100%', marginTop: 6, height: 36 }}
+						style={{ ...inputStyle('capital'), width: '100%', marginTop: 6 }}
 					/>
 				</section>
 
@@ -513,9 +569,7 @@ export default function Page() {
 								type="radio"
 								name="mandatory_expenses_included"
 								checked={vm.draft.mandatory_expenses_included === true}
-								onChange={() =>
-									updateDraft({ mandatory_expenses_included: true })
-								}
+								onChange={() => updateDraft({ mandatory_expenses_included: true })}
 							/>
 							{t('gatekeeper.common.yes')}
 						</label>
@@ -524,9 +578,7 @@ export default function Page() {
 								type="radio"
 								name="mandatory_expenses_included"
 								checked={vm.draft.mandatory_expenses_included === false}
-								onChange={() =>
-									updateDraft({ mandatory_expenses_included: false })
-								}
+								onChange={() => updateDraft({ mandatory_expenses_included: false })}
 							/>
 							{t('gatekeeper.common.no')}
 						</label>
@@ -535,18 +587,18 @@ export default function Page() {
 
 				{/* Time horizon (optional) */}
 				<section style={{ marginTop: 16 }}>
-					<label>{t('gatekeeper.fields.time_horizon.label')}</label>
+					<label style={labelStyle('time_horizon')}>{t('gatekeeper.fields.time_horizon.label')}</label>
 					<input
 						value={String(vm.draft.time_horizon ?? '')}
 						onChange={(e) => updateDraft({ time_horizon: e.target.value })}
 						placeholder={t('gatekeeper.fields.time_horizon.placeholder')}
-						style={{ width: '100%', marginTop: 6, height: 36 }}
+						style={{ ...inputStyle('time_horizon'), width: '100%', marginTop: 6 }}
 					/>
 				</section>
 
 				{/* Responsibility + Production */}
 				<section style={{ marginTop: 16, display: 'flex', gap: 16 }}>
-					<label>
+					<label style={labelStyle('responsibility_confirmed')}>
 						<input
 							type="checkbox"
 							checked={vm.draft.responsibility_confirmed}
@@ -618,15 +670,27 @@ export default function Page() {
 				</div>
 			)}
 
-			{/* ✅ Clarification (translated, lower block) */}
-			{clarificationItems.length > 0 && (
-				<section style={{ marginTop: 24 }}>
-					<h3>{t('gatekeeper.result.clarification.title')}</h3>
-					<ul>
-						{clarificationItems.map((q, i) => (
-							<li key={i}>{q}</li>
-						))}
-					</ul>
+			{/* ✅ Clarification alert under form (anchor) */}
+			{vm.ui_state === 'GATEKEEPER_RETURN' && clarificationItems.length > 0 && (
+				<section id="clarification" style={{ marginTop: 16 }}>
+					<div
+						style={{
+							padding: 12,
+							borderRadius: 8,
+							border: '1px solid #ffb300',
+							background: '#fff8e1',
+							color: '#7a5200',
+						}}
+					>
+						<div style={{ fontWeight: 700, marginBottom: 6 }}>
+							{t('gatekeeper.result.sections.clarification')}
+						</div>
+						<ul style={{ margin: 0, paddingLeft: 18 }}>
+							{clarificationItems.map((q, i) => (
+								<li key={i}>{q}</li>
+							))}
+						</ul>
+					</div>
 				</section>
 			)}
 

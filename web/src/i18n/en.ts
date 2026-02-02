@@ -88,21 +88,31 @@ export const en = {
 
 		result: {
 			clarification: {
-				title: 'Clarification',
+				cta: 'Go to clarification',
+
 				items: {
-					idea: 'Clarify the Idea field. Describe the idea meaningfully (not placeholders or random input).',
-					goal: 'Formulate the goal in a measurable way: metric + timeframe (min. 10 characters).',
+					idea: 'Clarify the idea: what exactly are we launching / validating? (min 10–15 chars)',
+					goal: 'Make the goal more specific: what counts as success and by when.',
 					context:
-						'Clarify the Context field. Explain why this opportunity/problem exists.',
+						'Add context: why now, what is the rationale (demand/seasonality/resources/location).',
 					problem:
-						'Clarify the Problem field. Describe what is not working, where losses occur, with 1–2 examples.',
-					country: 'Clarify the Country field.',
-					region: 'Clarify the Region field.',
-					city: 'Clarify the City field.',
+						'Describe the problem concretely: what fails, where the loss is, 1–2 examples.',
+					country: 'Specify the country (required).',
+					region: 'Specify the region/state (required).',
+					city: 'Specify the city (required for offline projects).',
 					capital:
-						'Specify the capital: number / range / shorthand (e.g. 100000, up to 200000, 100k).',
+						'Provide capital as a number or range (e.g. 100000 / up to 200000 / 100k).',
+					time_horizon:
+						'Provide a time horizon (e.g. 2 weeks / 1 month / 6 months).',
 					responsibility:
-						'Confirm responsibility by checking the checkbox — without this, execution is blocked.',
+						'Confirm responsibility via checkbox — analysis is blocked without it.',
+				},
+
+				stage: {
+					legality:
+						'Remove any hints of bypassing the law. The case must be legal.',
+					reality:
+						'Remove unrealistic expectations: the goal must be achievable with the given time and resources.',
 				},
 			},
 

@@ -1,56 +1,70 @@
 import type { GatekeeperResult, GatekeeperInput } from "../gatekeeper/types";
 
-type Question = string;
-type FieldKey = keyof GatekeeperInput | "region.country" | "region.region" | "region.city";
+type QuestionKey = string;
+type FieldKey =
+  | keyof GatekeeperInput
+  | "region.country"
+  | "region.region"
+  | "region.city";
 
-const FIELD_LABELS: Partial<Record<FieldKey, string>> = {
-  problem: "Problem",
-  goal: "Goal",
-  capital: "Capital",
-  time_horizon: "Time horizon",
-  responsibility_confirmed: "Подтверждение ответственности",
-  "region.country": "Страна",
-  "region.region": "Регион",
-  "region.city": "Город",
-};
-
-
-
-export function buildClarificationQuestions(result: GatekeeperResult): Question[] {
+export function buildClarificationQuestions(
+  result: GatekeeperResult
+): QuestionKey[] {
   const qs: string[] = [];
 
-  // Базово — по missing_fields
   for (const f of result.missing_fields ?? []) {
     switch (f) {
-      case "problem":
-        qs.push("Опиши проблему конкретно: что не работает, где потери, 1–2 примера. (мин. 15 символов)");
+      case "idea":
+        qs.push("gatekeeper.clarification.idea");
         break;
+
       case "goal":
-        qs.push("Сформулируй цель измеримо: метрика + срок. (мин. 10 символов)");
+        qs.push("gatekeeper.clarification.goal");
         break;
-      case "region":
-        qs.push("Укажи регион в формате 'страна + город/регион' (например: 'Россия Крым', 'Norway Oslo').");
+
+      case "context":
+        qs.push("gatekeeper.clarification.context");
         break;
+
+      case "problem":
+        qs.push("gatekeeper.clarification.problem");
+        break;
+
+      case "region.country":
+        qs.push("gatekeeper.clarification.region.country");
+        break;
+
+      case "region.region":
+        qs.push("gatekeeper.clarification.region.region");
+        break;
+
+      case "region.city":
+        qs.push("gatekeeper.clarification.region.city");
+        break;
+
       case "capital":
-        qs.push("Укажи капитал: число/диапазон/100k (например: '100000', 'до 200000', '100k').");
+        qs.push("gatekeeper.clarification.capital");
         break;
+
       case "time_horizon":
-        qs.push("Укажи горизонт: 2 недели / 1 месяц / 6 месяцев (любой понятный текст).");
+        qs.push("gatekeeper.clarification.time_horizon");
         break;
+
       case "responsibility_confirmed":
-        qs.push("Подтверди ответственность чекбоксом — без этого запуск запрещён.");
+        qs.push("gatekeeper.clarification.responsibility");
         break;
+
       default:
-        qs.push(`Уточни поле: ${FIELD_LABELS[f] ?? String(f)}`);
+        qs.push(`gatekeeper.clarification.${String(f)}`);
     }
   }
 
-  // Дополнительно — по stage, если нужно
   if (result.stage === "LEGALITY") {
-    qs.push("Уточни формулировки: кейс должен быть легальным. Убери любые намёки на обход закона.");
+    qs.push("gatekeeper.clarification.legality");
   }
+
   if (result.stage === "REALITY") {
-    qs.push("Сними нереалистичные ожидания: цель должна быть достижима в срок и с ресурсами.");
+    qs.push("gatekeeper.clarification.reality");
   }
 
   return qs;
