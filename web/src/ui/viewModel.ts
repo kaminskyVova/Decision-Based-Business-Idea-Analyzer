@@ -1,9 +1,19 @@
 import type { GatekeeperInput, GatekeeperResult } from "../core/gatekeeper/types";
 
 export type AIPrecheckResult = {
-  normalized: Pick<GatekeeperInput, "problem" | "goal" | "region" | "capital" | "time_horizon">;
-  reality: { verdict: "OK" | "SUSPECT" | "BULLSHIT"; reasons: string[]; confidence?: number };
-  clarification: { required: boolean; questions: string[] };
+  normalized: Pick<GatekeeperInput, "idea" | "goal"> & {
+    context?: string;
+    problem?: string;
+  };
+  reality: {
+    verdict: "OK" | "SUSPECT" | "BULLSHIT";
+    reasons: string[];
+    confidence?: number;
+  };
+  clarification: {
+    required: boolean;
+    questions: string[];
+  };
   notes: string[];
 };
 

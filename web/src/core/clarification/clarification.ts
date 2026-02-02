@@ -1,16 +1,18 @@
-import type { GatekeeperResult, GatekeeperInput } from "@/core/gatekeeper/types";
+import type { GatekeeperResult, GatekeeperInput } from "../gatekeeper/types";
 
 type Question = string;
+type FieldKey = keyof GatekeeperInput | "region.country" | "region.region" | "region.city";
 
-const FIELD_LABELS: Partial<Record<keyof GatekeeperInput, string>> = {
+const FIELD_LABELS: Partial<Record<FieldKey, string>> = {
   problem: "Problem",
   goal: "Goal",
-  region: "Region",
   capital: "Capital",
   time_horizon: "Time horizon",
   responsibility_confirmed: "Подтверждение ответственности",
+  "region.country": "Страна",
+  "region.region": "Регион",
+  "region.city": "Город",
 };
-
 
 
 
@@ -39,7 +41,7 @@ export function buildClarificationQuestions(result: GatekeeperResult): Question[
         qs.push("Подтверди ответственность чекбоксом — без этого запуск запрещён.");
         break;
       default:
-        qs.push('Уточни поле: ${FIELD_LABELS[f] ?? String(f)}');
+        qs.push(`Уточни поле: ${FIELD_LABELS[f] ?? String(f)}`);
     }
   }
 
