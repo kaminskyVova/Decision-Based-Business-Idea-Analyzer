@@ -143,5 +143,49 @@ export const en = {
 				ai: 'AI precheck',
 			},
 		},
+		reason_codes: {
+			'RC-01': {
+				title: 'Missing or invalid input data',
+				description:
+					'Core fields (idea/context/region, etc.) are missing or invalid.',
+			},
+			'RC-02': {
+				title: 'Goal is undefined or not measurable',
+				description:
+					'Goal is phrased as a wish or has no measurable success criteria.',
+			},
+			'RC-03': {
+				title: 'Responsibility not confirmed',
+				description: 'User did not confirm they are responsible for decisions.',
+			},
+			'RC-04': {
+				title: 'Contradicts reality constraints',
+				description: 'Inputs conflict with basic real-world constraints.',
+			},
+			'RC-05': {
+				title: 'Legality issue',
+				description:
+					'Indicators of illegal activity or attempts to bypass requirements.',
+			},
+			'RC-06': {
+				title: 'Attempt to push the system',
+				description:
+					'Repeated attempts without updating inputs or bypassing the process.',
+			},
+			'RC-07': {
+				title: 'Capital missing or invalid',
+				description: 'Capital is missing or cannot be parsed/understood.',
+			},
+			'RC-08': {
+				title: 'Out of scope',
+				description:
+					'Request is not related to strict idea evaluation or problem solving.',
+			},
+			'RC-09': {
+				title: 'Resource mismatch',
+				description:
+					'For production cases, resources do not match the stated goal.',
+			},
+		},
 	},
 };
