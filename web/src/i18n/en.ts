@@ -107,6 +107,21 @@ export const en = {
 					responsibility:
 						'Confirm responsibility via checkbox — analysis is blocked without it.',
 				},
+				readability: {
+					idea: 'The “Idea” field contains unreadable or meaningless text.',
+					goal: 'The “Goal” field contains unreadable or meaningless text.',
+					context:
+						'The “Context” field contains unreadable or meaningless text.',
+					problem:
+						'The “Problem” field contains unreadable or meaningless text.',
+					time_horizon:
+						'The “Time horizon” field contains unreadable or invalid text.',
+					region: {
+						country: 'The “Country” field contains unreadable or invalid text.',
+						region: 'The “Region” field contains unreadable or invalid text.',
+						city: 'The “City” field contains unreadable or invalid text.',
+					},
+				},
 
 				stage: {
 					legality:
