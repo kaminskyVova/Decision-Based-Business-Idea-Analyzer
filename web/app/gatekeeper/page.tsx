@@ -22,6 +22,9 @@ const emptyDraft: GatekeeperInput = {
 	production_related: false,
 };
 
+type GatekeeperDecision = 'ADMITTED' | 'RETURN_WITH_CONDITIONS' | 'HARD_FAIL';
+type AiVerdict = 'OK' | 'NEEDS_CLARIFICATION' | 'BLOCK';
+
 export default function Page() {
 	const [vm, setVm] = useState<ViewModel>({
 		ui_state: 'DRAFT',
@@ -86,34 +89,45 @@ export default function Page() {
 	}, [currentHash, vm.admitted_hash, vm.ui_state]);
 
 	function updateDraft(patch: Partial<GatekeeperInput>) {
-  setVm((prev) => {
-    const nextDraft = { ...prev.draft, ...patch };
+		setVm((prev) => {
+			const nextDraft = { ...prev.draft, ...patch };
 
-    // ✅ считаем, что "проверка уже была", если есть результат
-    // (gatekeeper/ai) или если есть admitted_hash
-    const wasChecked = Boolean(prev.gatekeeper || prev.ai || prev.admitted_hash);
+			const wasChecked = Boolean(prev.gatekeeper || prev.ai || prev.admitted_hash);
 
-    return {
-      ...prev,
-      draft: nextDraft,
+			return {
+				...prev,
+				draft: nextDraft,
 
-      // ✅ любое изменение после проверки → показываем "данные изменены"
-      // можно оставлять ui_state как есть, но проще выставить ADMITTED_DIRTY
-      // (это просто флаг "нужна перепроверка")
-      ui_state: wasChecked ? 'ADMITTED_DIRTY' : prev.ui_state,
-      status_key: wasChecked
-        ? 'gatekeeper.result.badges.admitted_dirty'
-        : prev.status_key,
+				ui_state: wasChecked ? 'ADMITTED_DIRTY' : prev.ui_state,
+				status_key: wasChecked
+					? 'gatekeeper.result.badges.admitted_dirty'
+					: prev.status_key,
 
-      // ✅ при правке — сбрасываем результаты
-      gatekeeper: wasChecked ? undefined : prev.gatekeeper,
-      ai: wasChecked ? undefined : prev.ai,
+				// при правке — сбрасываем результаты
+				gatekeeper: wasChecked ? undefined : prev.gatekeeper,
+				ai: wasChecked ? undefined : prev.ai,
+			};
+		});
+	}
 
-      // admitted_hash НЕ трогаем: он нужен как “последний clean”
-      // admitted_hash: prev.admitted_hash,
-    };
-  });
-}
+	function combineVerdicts(
+		aiVerdict: AiVerdict | undefined,
+		gatekeeperDecision: GatekeeperDecision | undefined,
+	): GatekeeperDecision {
+		// 1) Gatekeeper HARD_FAIL всегда побеждает
+		if (gatekeeperDecision === 'HARD_FAIL') return 'HARD_FAIL';
+
+		// 2) AI BLOCK = жесткий стоп
+		if (aiVerdict === 'BLOCK') return 'HARD_FAIL';
+
+		// 3) Любые "условия/уточнения" => RETURN_WITH_CONDITIONS
+		if (gatekeeperDecision === 'RETURN_WITH_CONDITIONS')
+			return 'RETURN_WITH_CONDITIONS';
+		if (aiVerdict === 'NEEDS_CLARIFICATION') return 'RETURN_WITH_CONDITIONS';
+
+		// 4) Иначе допуск
+		return 'ADMITTED';
+	}
 
 	async function onPrecheck() {
 		setVm((p) => ({
@@ -139,26 +153,13 @@ export default function Page() {
 
 		const ai = await res.json();
 
-		// AI hard-stop (пример: нереалистичная/фантастическая цель)
-		if (ai?.reality?.verdict === 'BULLSHIT') {
-			setVm((p) => ({
-				...p,
-				ai,
-				ui_state: 'AI_HARD_STOP',
-				status_key: 'gatekeeper.result.badges.ai_hard_stop',
-			}));
-			return;
-		}
-
 		// Нормализация (AI может отдать normalized поля)
 		const canonicalDraft: GatekeeperInput = {
 			...vm.draft,
 			...ai.normalized,
 			responsibility_confirmed: Boolean(vm.draft.responsibility_confirmed),
 			production_related: Boolean(vm.draft.production_related),
-			mandatory_expenses_included: Boolean(
-				vm.draft.mandatory_expenses_included,
-			),
+			mandatory_expenses_included: Boolean(vm.draft.mandatory_expenses_included),
 		};
 
 		setVm((p) => ({
@@ -169,22 +170,25 @@ export default function Page() {
 
 		const gatekeeper = runGatekeeper(canonicalDraft);
 
-		if (gatekeeper.decision === 'HARD_FAIL') {
+		const finalDecision = combineVerdicts(ai?.verdict, gatekeeper.decision);
+		const mergedGatekeeper = { ...gatekeeper, decision: finalDecision };
+
+		if (finalDecision === 'HARD_FAIL') {
 			setVm((p) => ({
 				...p,
 				ai,
-				gatekeeper,
+				gatekeeper: mergedGatekeeper,
 				ui_state: 'GATEKEEPER_HARD_FAIL',
 				status_key: 'gatekeeper.result.badges.hard_fail',
 			}));
 			return;
 		}
 
-		if (gatekeeper.decision === 'RETURN_WITH_CONDITIONS') {
+		if (finalDecision === 'RETURN_WITH_CONDITIONS') {
 			setVm((p) => ({
 				...p,
 				ai,
-				gatekeeper,
+				gatekeeper: mergedGatekeeper,
 				ui_state: 'GATEKEEPER_RETURN',
 				status_key: 'gatekeeper.result.badges.return_with_conditions',
 			}));
@@ -197,8 +201,8 @@ export default function Page() {
 		setVm((p) => ({
 			...p,
 			ai,
-			gatekeeper,
-			draft: canonicalDraft, // синхронизация после нормализации
+			gatekeeper: mergedGatekeeper,
+			draft: canonicalDraft,
 			admitted_hash,
 			ui_state: 'ADMITTED_CLEAN',
 			status_key: 'gatekeeper.result.badges.admitted_clean',
@@ -212,13 +216,14 @@ export default function Page() {
 		vm.ui_state !== 'AI_CHECK_RUNNING' &&
 		vm.ui_state !== 'GATEKEEPER_RUNNING';
 
+	// ===== safe reason_codes =====
+	const reasonCodes: string[] = useMemo(() => {
+		const arr = (vm.gatekeeper as any)?.reason_codes;
+		return Array.isArray(arr) ? arr.map((x: any) => String(x)) : [];
+	}, [vm.gatekeeper]);
+
 	/**
-	 * ✅ Clarification list (i18n):
-	 * Ожидаемые ключи:
-	 * gatekeeper.result.section.clarification
-	 * gatekeeper.result.clarification.items.*
-	 * gatekeeper.result.clarification.stage.*
-	 * gatekeeper.result.clarification.cta
+	 * Clarification list (i18n)
 	 */
 	const clarificationItems = useMemo(() => {
 		if (!vm.gatekeeper) return [];
@@ -252,13 +257,17 @@ export default function Page() {
 			}
 		};
 
-		for (const f of (vm.gatekeeper as any).missing_fields ?? []) {
-			const key = mapFieldToKey(String(f));
+		const missing = (vm.gatekeeper as any)?.missing_fields;
+		const missingArr: string[] = Array.isArray(missing)
+			? missing.map((x: any) => String(x))
+			: [];
+
+		for (const f of missingArr) {
+			const key = mapFieldToKey(f);
 			if (!key) continue;
 			items.push(t(`gatekeeper.result.clarification.items.${key}`));
 		}
 
-		// stage-based additions
 		if (vm.gatekeeper.stage === 'LEGALITY') {
 			items.push(t('gatekeeper.result.clarification.stage.legality'));
 		}
@@ -271,8 +280,9 @@ export default function Page() {
 
 	// ===== UX: field highlight from missing_fields =====
 	const missingSet = useMemo(() => {
-		const arr = (vm.gatekeeper as any)?.missing_fields ?? [];
-		return new Set(arr.map((x: any) => String(x)));
+		const arr = (vm.gatekeeper as any)?.missing_fields;
+		const safeArr: string[] = Array.isArray(arr) ? arr.map((x: any) => String(x)) : [];
+		return new Set(safeArr);
 	}, [vm.gatekeeper]);
 
 	const isMissing = useCallback(
@@ -318,9 +328,7 @@ export default function Page() {
 	);
 
 	const scrollToClarification = useCallback(() => {
-		document
-			.getElementById('clarification')
-			?.scrollIntoView({ behavior: 'smooth' });
+		document.getElementById('clarification')?.scrollIntoView({ behavior: 'smooth' });
 	}, []);
 
 	return (
@@ -363,48 +371,47 @@ export default function Page() {
 							...getGatekeeperAlertStyle(vm.gatekeeper.decision),
 						}}
 					>
-						<div style={{ fontWeight: 700 }}>
-							{t('gatekeeper.result.title')}
-						</div>
+						<div style={{ fontWeight: 700 }}>{t('gatekeeper.result.title')}</div>
 
 						<div style={{ marginTop: 6 }}>
 							{t('gatekeeper.result.labels.decision')}:&nbsp;
 							{t(`gatekeeper.result.decision.${vm.gatekeeper.decision}`)}
 						</div>
 
-						{vm.ui_state === 'GATEKEEPER_RETURN' &&
-							clarificationItems.length > 0 && (
-								<div style={{ marginTop: 10 }}>
-									<button
-										type="button"
-										onClick={scrollToClarification}
-										style={{
-											height: 34,
-											padding: '0 10px',
-											borderRadius: 6,
-											border: '1px solid #ffb300',
-											background: '#ed900f',
-											cursor: 'pointer',
-										}}
-									>
-										{t('gatekeeper.result.clarification.cta')}
-									</button>
-								</div>
-							)}
+						{vm.ui_state === 'GATEKEEPER_RETURN' && clarificationItems.length > 0 && (
+							<div style={{ marginTop: 10 }}>
+								<button
+									type="button"
+									onClick={scrollToClarification}
+									style={{
+										height: 34,
+										padding: '0 10px',
+										borderRadius: 6,
+										border: '1px solid #ffb300',
+										background: '#ed900f',
+										cursor: 'pointer',
+									}}
+								>
+									{t('gatekeeper.result.clarification.cta')}
+								</button>
+							</div>
+						)}
 
-						{(vm.gatekeeper as any).reason_codes.map(
-							(rc: string, i: number) => (
-								<li key={i} style={{ marginBottom: 6 }}>
-									<div>
-										<strong>{rc}</strong>
-										{' — '}
-										{t(`gatekeeper.reason_codes.${rc}.title`)}
-									</div>
-									<div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>
-										{t(`gatekeeper.reason_codes.${rc}.description`)}
-									</div>
-								</li>
-							),
+						{reasonCodes.length > 0 && (
+							<ul style={{ marginTop: 10, paddingLeft: 18 }}>
+								{reasonCodes.map((rc: string, i: number) => (
+									<li key={i} style={{ marginBottom: 6 }}>
+										<div>
+											<strong>{rc}</strong>
+											{' — '}
+											{t(`gatekeeper.reason_codes.${rc}.title`)}
+										</div>
+										<div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>
+											{t(`gatekeeper.reason_codes.${rc}.description`)}
+										</div>
+									</li>
+								))}
+							</ul>
 						)}
 					</div>
 				</section>
@@ -430,9 +437,7 @@ export default function Page() {
 								type="radio"
 								name="request_type"
 								checked={vm.draft.request_type === 'PROBLEM_SOLVING'}
-								onChange={() =>
-									updateDraft({ request_type: 'PROBLEM_SOLVING' })
-								}
+								onChange={() => updateDraft({ request_type: 'PROBLEM_SOLVING' })}
 							/>
 							{t('gatekeeper.fields.request_type.problem_solving')}
 						</label>
@@ -466,9 +471,7 @@ export default function Page() {
 
 				{/* Idea */}
 				<section style={{ marginTop: 16 }}>
-					<label style={labelStyle('idea')}>
-						{t('gatekeeper.fields.idea.label')}
-					</label>
+					<label style={labelStyle('idea')}>{t('gatekeeper.fields.idea.label')}</label>
 					<textarea
 						value={String(vm.draft.idea ?? '')}
 						onChange={(e) => updateDraft({ idea: e.target.value })}
@@ -479,9 +482,7 @@ export default function Page() {
 
 				{/* Goal */}
 				<section style={{ marginTop: 16 }}>
-					<label style={labelStyle('goal')}>
-						{t('gatekeeper.fields.goal.label')}
-					</label>
+					<label style={labelStyle('goal')}>{t('gatekeeper.fields.goal.label')}</label>
 					<textarea
 						value={String(vm.draft.goal ?? '')}
 						onChange={(e) => updateDraft({ goal: e.target.value })}
@@ -493,9 +494,7 @@ export default function Page() {
 				{/* Context OR Problem */}
 				{vm.draft.request_type === 'OPPORTUNITY' ? (
 					<section style={{ marginTop: 16 }}>
-						<label style={labelStyle('context')}>
-							{t('gatekeeper.fields.context.label')}
-						</label>
+						<label style={labelStyle('context')}>{t('gatekeeper.fields.context.label')}</label>
 						<textarea
 							value={String(vm.draft.context ?? '')}
 							onChange={(e) => updateDraft({ context: e.target.value })}
@@ -505,9 +504,7 @@ export default function Page() {
 					</section>
 				) : (
 					<section style={{ marginTop: 16 }}>
-						<label style={labelStyle('problem')}>
-							{t('gatekeeper.fields.problem.label')}
-						</label>
+						<label style={labelStyle('problem')}>{t('gatekeeper.fields.problem.label')}</label>
 						<textarea
 							value={String(vm.draft.problem ?? '')}
 							onChange={(e) => updateDraft({ problem: e.target.value })}
@@ -572,9 +569,7 @@ export default function Page() {
 
 				{/* Capital */}
 				<section style={{ marginTop: 16 }}>
-					<label style={labelStyle('capital')}>
-						{t('gatekeeper.fields.capital.label')}
-					</label>
+					<label style={labelStyle('capital')}>{t('gatekeeper.fields.capital.label')}</label>
 					<input
 						value={String(vm.draft.capital ?? '')}
 						onChange={(e) => updateDraft({ capital: e.target.value })}
@@ -592,9 +587,7 @@ export default function Page() {
 								type="radio"
 								name="mandatory_expenses_included"
 								checked={vm.draft.mandatory_expenses_included === true}
-								onChange={() =>
-									updateDraft({ mandatory_expenses_included: true })
-								}
+								onChange={() => updateDraft({ mandatory_expenses_included: true })}
 							/>
 							{t('gatekeeper.common.yes')}
 						</label>
@@ -603,9 +596,7 @@ export default function Page() {
 								type="radio"
 								name="mandatory_expenses_included"
 								checked={vm.draft.mandatory_expenses_included === false}
-								onChange={() =>
-									updateDraft({ mandatory_expenses_included: false })
-								}
+								onChange={() => updateDraft({ mandatory_expenses_included: false })}
 							/>
 							{t('gatekeeper.common.no')}
 						</label>
@@ -621,11 +612,7 @@ export default function Page() {
 						value={String(vm.draft.time_horizon ?? '')}
 						onChange={(e) => updateDraft({ time_horizon: e.target.value })}
 						placeholder={t('gatekeeper.fields.time_horizon.placeholder')}
-						style={{
-							...inputStyle('time_horizon'),
-							width: '100%',
-							marginTop: 6,
-						}}
+						style={{ ...inputStyle('time_horizon'), width: '100%', marginTop: 6 }}
 					/>
 				</section>
 
@@ -646,9 +633,7 @@ export default function Page() {
 						<input
 							type="checkbox"
 							checked={vm.draft.production_related}
-							onChange={(e) =>
-								updateDraft({ production_related: e.target.checked })
-							}
+							onChange={(e) => updateDraft({ production_related: e.target.checked })}
 						/>
 						{t('gatekeeper.checkboxes.production')}
 					</label>
@@ -703,7 +688,7 @@ export default function Page() {
 				</div>
 			)}
 
-			{/* ✅ Clarification alert under form (anchor) */}
+			{/* Clarification alert under form (anchor) */}
 			{vm.ui_state === 'GATEKEEPER_RETURN' && clarificationItems.length > 0 && (
 				<section id="clarification" style={{ marginTop: 16 }}>
 					<div

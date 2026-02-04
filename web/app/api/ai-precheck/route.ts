@@ -1,81 +1,59 @@
-import { NextResponse } from 'next/server';
-import type { AIPrecheckResult } from '@/ui/viewModel';
-import type { GatekeeperInput } from '@/core/gatekeeper/types';
-import { normalizeText } from '@/core/gatekeeper/validators';
+import { NextResponse } from "next/server";
+import OpenAI from "openai";
+
+import type { GatekeeperInput } from "@/core/gatekeeper/types";
+import type { AiPrecheckResponse } from "@/core/ai-guard/types";
+
+import { buildAiPrecheckPrompt, finalizeAiPrecheck } from "@/core/ai-guard/aiGuard";
+import { aiPrecheckJsonSchema } from "@/core/ai-guard/schema";
+
+function hasOpenAIKey(): boolean {
+  return Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim());
+}
 
 export async function POST(req: Request) {
   const raw = (await req.json()) as GatekeeperInput;
 
-  // Strict normalization — no guessing
-  const idea =
-    typeof raw.idea === 'string' ? normalizeText(raw.idea) : '';
+  // 1) Нет ключа — не падаем, возвращаем детерминированный итог
+  if (!hasOpenAIKey()) {
+    const result: AiPrecheckResponse = finalizeAiPrecheck(raw, null);
+    return NextResponse.json(result);
+  }
 
-  const goal =
-    typeof raw.goal === 'string' ? normalizeText(raw.goal) : '';
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
 
-  const context =
-    typeof raw.context === 'string'
-      ? normalizeText(raw.context)
-      : '';
+  const prompt = buildAiPrecheckPrompt(raw);
 
-  const problem =
-    typeof raw.problem === 'string'
-      ? normalizeText(raw.problem)
-      : '';
+  try {
+  const resp = await client.responses.create({
+  model,
+  temperature: 0,
+  max_output_tokens: 800,
+  input: `You are an AI precheck layer.
+Return ONLY valid JSON that matches the provided schema.
+No markdown. No extra keys.
 
-  // Combine for naive deterministic Reality Check
-  const combined = `${idea} ${goal} ${context} ${problem}.toLowerCase()`;
+${prompt}`,
+  response_format: {
+    type: "json_schema",
+    json_schema: aiPrecheckJsonSchema,
+  },
+} as any);
 
-  const fantasyMarkers = [
-    'на луну',
-    'на марс',
-    'марс',
-    'телепортац',
-    'вечный двигатель',
-    '100% без риска',
-    'гарантированно',
-    'гарантия 100%',
-    'без вложений и риска',
-  ];
+    const text = (resp.output_text ?? "").trim();
+    if (!text) {
+      const result: AiPrecheckResponse = finalizeAiPrecheck(raw, null);
+      return NextResponse.json(result);
+    }
 
-  const isBullshit = fantasyMarkers.some((m) =>
-    combined.includes(m),
-  );
+    const parsed = JSON.parse(text) as AiPrecheckResponse;
 
-  const result: AIPrecheckResult = {
-    normalized: {
-      idea, // 🔑 ОБЯЗАТЕЛЬНО
-      goal, // 🔑 ОБЯЗАТЕЛЬНО
-
-      // строго по типу запроса
-      context:
-        raw.request_type === 'OPPORTUNITY'
-          ? context || undefined
-          : undefined,
-
-      problem:
-        raw.request_type === 'PROBLEM_SOLVING'
-          ? problem || undefined
-          : undefined,
-    },
-
-    reality: {
-      verdict: isBullshit ? 'BULLSHIT' : 'OK',
-      reasons: isBullshit
-        ? [
-            'Вводные содержат признаки нереалистичного сценария (Reality Check).',
-          ]
-        : [],
-      confidence: isBullshit ? 0.9 : 0.7,
-    },
-
-    clarification: {
-      required: false,
-      questions: [],
-    },
-
-    notes: [],
-  };
-
-  return NextResponse.json(result);
+    // Финализация всегда через finalize
+    const result: AiPrecheckResponse = finalizeAiPrecheck(raw, parsed);
+    return NextResponse.json(result);
+  } catch {
+    const result: AiPrecheckResponse = finalizeAiPrecheck(raw, null);
+    return NextResponse.json(result);
+  }
 }
